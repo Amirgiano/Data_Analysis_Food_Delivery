@@ -1,0 +1,305 @@
+
+---
+title: Glovo Market Intelligence
+author: Ibrahim Israfilov
+date: 5/9/2021
+output: html_document
+---
+
+
+```{r include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+```
+
+Importing the data in workspace
+
+```{r}
+#Read datasets. 
+myfiles= list.files(pattern = "\\.csv$")
+my_data= lapply(myfiles, read.csv)
+```
+
+Join multiple dataframes using reduce
+
+```{r}
+#Join datasets with partner id key.
+joined_data <- Reduce(function(x,y)merge(x,y,all=TRUE, no.dups=FALSE),my_data)
+glimpse(joined_data)
+
+```
+
+
+Data Exploration and Missing Values:
+We have 2 empty cells. assigned as NA values
+```{r}
+joined_data[joined_data=='']
+joined_data[joined_data$business_segment=='',]
+
+#Defining the empty cells as na
+joined_data[joined_data==''] = NA
+#Checking out the NA data.
+sum(is.na(joined_data))
+
+```
+
+
+```{r}
+summary(joined_data)
+```
+
+```{r}
+#Extra histogram
+ggplot(joined_data, aes(partner_id))+
+  geom_histogram(bins=100,fill="steelblue")+
+  labs(title= "Partners Distrivution (Not unique)",
+        x= "Partners")
+  
+```
+1. How many active partners are?
+Active partners represent the unique number of partners occuring in the dataset. They are 46208.
+```{r}
+joined_data['partner_id'] %>% unique() %>% count
+```
+2. What is the breakdown per country? And per business segment? (1 point)
+Breakdown would be the minimum sales for the country. 
+First let's check how many countries are 
+```{r}
+joined_data %>% count(country)
+```
+Now let's find the breakdown for the country.  Let's find the profit.
+```{r}
+joined_data = joined_data %>% mutate(profit = avg_order_revenue*orders_daily - avg_order_cost*orders_daily )
+```
+Once we have the profit we can find the least profit for each country
+```{r}
+summary(joined_data$profit)
+```
+```{r}
+joined_data %>% 
+  group_by(country) %>% 
+  summarise(min = min(profit))
+```
+```{r}
+joined_data %>% 
+  group_by(business_segment) %>% 
+  summarise(min = min(profit))
+```
+3. What percentage of partners have delivered 80% of the orders? (2 points)
+Probably it asks for 80/20 Pareto rule. (tot_orders* 0.8-orders_daily) while tot_orders 0.8 <=0 partners =+1 partners/tot_partners*100
+
+
+```{r}
+#80 % of orders
+sum(joined_data$orders_daily*0.8)
+
+#Defining Pareto dataset
+Pareto = joined_data %>% 
+  group_by(partner_id) %>% 
+  summarize(orders=sum(orders_daily)) 
+Pareto = arrange(Pareto, desc(orders))
+
+#Identifying the approach
+summary(Pareto$orders)
+#75% of our data is within 3-20 orders. 
+Pareto %>% ggplot(aes(orders)) +
+  geom_histogram(fill="steelblue")+
+  xlim(0,1000)
+  
+#Getting how many of the partners have delivered >2000 orders.
+Pareto %>%  filter(Pareto$orders>2000) %>% summarise(count_2k=n(),sum(orders))
+#13 Partners with >2000 have delievered only 32619 orders which means we can input first the big numbers then smalls and we will arrive to 80%
+
+```
+```{r}
+#Until sum pareto arrives to the 80% of the sales we count the number of the partners. Pareto dataset has the descending order meaning the greater numbers are standing at the top and loop is going to get them first
+sum_pareto = 0
+count=0
+for (i in Pareto$orders){
+  if (sum_pareto < 1009500){
+    sum_pareto =sum_pareto+i
+    count = count+1
+    #print(i) just for curiosity I printed all i the least one is 25.
+  }
+  else break
+  }
+
+per_partner = (count)/nrow(Pareto)*100
+
+
+print(paste0("The sum orders that " , count, " partners have delievered is " , sum_pareto))
+print(paste0("The percentage of the partners delievered 80% of total orders is ", round(per_partner,2)  , "%"))
+    
+```
+
+4. Average delivery Time in Portugal
+```{r}
+joined_data = joined_data %>% mutate(country = factor(country))
+str(joined_data$country)
+
+pt= joined_data %>% 
+  group_by(country) %>% 
+  filter(country=="PT") %>% 
+  summarize(mean_delivery=round(mean(avg_delivery_time_min),2))
+print(pt)
+
+```
+
+5. What is the share of orders that integrated partners delivered?
+```{r}
+integ = joined_data %>% 
+  group_by(is_integrated) %>%
+  filter(is_integrated=="True") %>% summarize(tot_orders = sum(orders_daily),share=tot_orders/sum(joined_data$orders_daily))
+
+print(integ)
+```
+6. What is the distribution of the cost per order? Does it follow any known distribution? Is there anything odd in the distribution? (3 points)
+
+```{r}
+joined_data %>% ggplot(aes(orders_daily,avg_order_cost))+
+  geom_point(color="steelblue")
+```
+```{r}
+#Right skewed distribution. (Zoomed in to see better the distribution and binwidth for more inclusion)
+summary(joined_data$avg_order_cost)
+joined_data %>% 
+  ggplot(aes(avg_order_cost)) +
+  ylim(0,2000)+
+  xlim(0,80)+
+  geom_histogram(binwidth = 0.1,fill='yellow')
+```
+7.What is the number of orders compared to connected time? Is there a
+correlation between the two? (3 points)
+```{r}
+plot = joined_data %>% ggplot(aes(connected_hours,orders_daily))
+
+plot_log = joined_data %>% ggplot(aes(log(connected_hours),log(orders_daily)))
+
+plot + geom_point(color="steelblue")+
+  geom_smooth(method = "lm", color=alpha('red', 0.5),size=2)
+
+plot_log + geom_point(color="green")+
+  geom_smooth(method = "lm", color=alpha('red', 0.5),size=2)
+
+
+
+
+
+#There is a small correlation which and P value is under 0.005 to reject a null hypothesis.
+cor.test(joined_data$orders_daily, joined_data$connected_hours)
+#For 1 hour of increase we have 0.09 of increase in orders.
+```
+8. What are the differences in the metrics for food vs Q-commerce? (3 points)
+```{r}
+vertical = joined_data %>% group_by(vertical) %>% summarize(avg_daily_orders =mean(orders_daily),avg_revenue =mean(avg_order_revenue),avg_cost= mean(avg_order_cost),avg_devilery_time=mean(avg_delivery_time_min),avg_preparation_time= mean(avg_preparation_time_min), quantity= n(),avg_connected_hours= mean(connected_hours))
+print(vertical)
+```
+```{r message=FALSE, warning=FALSE}
+#Distribution of the vertical by country 
+joined_data %>% ggplot(aes(country,color=vertical))+
+  geom_bar(aes(fill=vertical))
+#Distribution of vertical by segment
+joined_data %>% ggplot(aes(business_segment,color=vertical))+
+  geom_bar(aes(fill=vertical))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#Daily orders 
+joined_data %>% ggplot(aes(vertical, avg_delivery_time_min,fill=vertical))+
+  geom_boxplot()+
+  stat_summary(fun.y=mean)+
+  ylim(0,60)
+
+```
+9. Among all the possible combinations of dimensions (segments), which one has the highest number of partners? (3 points)
+```{r}
+#We have 6 segments and by finding the number of the partners per segment we respond to the question of the total number of the partners. The most populated segment in terms of the partners is "Long Tail"
+joined_data = joined_data %>% mutate(business_segment=factor(business_segment))
+segments =joined_data %>%
+  group_by(business_segment) %>%
+  summarise(n = n_distinct(partner_id)) %>% 
+  arrange(desc(n))
+print(segments)
+
+```
+Task 2 (15 points). Choose one of the following two questions:
+
+Options 2. Now that you are familiar with Glovo’s partners, imagine we want to run an experiment in Spain (ES). Create two groups of partners that behave similarly in terms of metrics. Make sure all types of partners are represented.
+Segment->group -> 2 group ->Behave similarly
+
+```{r message=FALSE, warning=FALSE}
+library(corrplot)
+#By country
+es= joined_data %>% group_by(country) %>% 
+  filter(country=='ES')
+print(es)
+
+numeric= es %>%  select(where(is.numeric))
+numeric$country = NULL
+```
+
+
+```{r}
+#Seeing correlation
+M = cor(numeric)
+print(M)
+corrplot(M, method = 'color')
+```
+
+There are two takeaways can be extracted from the correlation heat map are two points. 1 positive correlation between the cost and the preparation time. The more it takes to prepare the more the cost is (This is what we will focus on since we need to create 2 groups of partners) 
+
+Moreover, for my own curiosity I have discovered another pattern which I would love to draw your attention too. This is the negative correlation between the cost and the time delivery. The faster delivery costs more. It would be the nice argument to optimize by running an experiment. 
+
+```{r}
+experiment_partner = es %>% group_by(partner_id) %>% 
+  summarise(orders = mean(orders_daily), preparation=mean(avg_preparation_time_min),cost=mean(avg_order_cost),revenue=mean(avg_order_revenue),segment=business_segment)
+summary(experiment_partner$preparation)
+
+#Visualization of preparation, revenue and cost relationship
+experiment_partner %>% 
+  ggplot(aes(preparation,revenue, color=cost))+
+  geom_point()+
+  xlim(0,100)+
+  scale_colour_gradientn(colours = rev(hcl.colors(25)))
+
+#Preparation Cost Relationship
+experiment_partner %>% 
+  ggplot(aes(preparation,cost, color=revenue))+
+  geom_point()+
+  xlim(0,100)
+
+vline.data <- experiment_partner %>%
+              group_by(segment) %>%
+              summarize(z = mean(preparation))
+
+#Preparation Cost Relationship by segments
+experiment_partner %>% 
+  ggplot(aes(preparation,cost, color=revenue))+
+  geom_point()+
+  xlim(0,100)+
+  geom_vline(aes(xintercept = z), vline.data, colour = "red")+
+  facet_grid(. ~ segment)
+```
+
+From the visualization of the data above the model of the Big Chain would e nice to stick with (Also for the further analysis to optimize the operations). So i choose 25' as an efficient preparation threeshold and divide the partners into fast and slow groups.
+
+
+```{r}
+#1st group. Fast one.
+fast = es %>% group_by(partner_id) %>% 
+  filter(avg_preparation_time_min <=15) %>% 
+  summarise(cost= mean(avg_order_cost),preparation_time=mean(avg_preparation_time_min),profit=mean(profit),revenue=mean(avg_order_revenue)) 
+
+#2nd Group. Slow one.
+slow = es %>% group_by(partner_id) %>% 
+  filter(avg_preparation_time_min >15) %>% 
+  summarise(mean(avg_preparation_time_min)) 
+
+
+#Merging with business segments
+business_segments= read.csv("data_business_segments.csv")
+  slow= merge(slow,business_segments,by="partner_id")
+  fast= merge(fast,business_segments,by="partner_id")
+write.csv(fast, "first_group_es.csv",row.names=FALSE)
+write.csv(slow,"second_group_es.csv",row.names=FALSE)
+```
