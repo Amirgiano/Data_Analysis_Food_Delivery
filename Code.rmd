@@ -1,6 +1,6 @@
 
 ---
-title: Glovo Market Intelligence
+title: Delivery Business Case Study
 author: Ibrahim Israfilov
 date: 5/9/2021
 output: html_document
